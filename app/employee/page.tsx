@@ -112,7 +112,7 @@ export default function EmployeeDashboardPage() {
         <CardHeader title="Quick Actions" />
         <CardContent>
           <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={handleCheck} size="lg">
+            <Button onClick={handleCheck} className="px-5 py-2.5 text-base">
               <Clock8 className="mr-2" size={18} /> {checkedIn ? "Check-Out" : "Check-In"}
             </Button>
             <span className="text-xs text-slate-500">{timestamp ? `Last action: ${timestamp}` : ""}</span>
