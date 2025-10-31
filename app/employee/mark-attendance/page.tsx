@@ -52,7 +52,7 @@ export default function EmployeeMarkAttendancePage() {
               <MapPin size={16} className={gpsOk ? "text-green-600" : "text-amber-600"} />
               GPS {gpsOk ? "Captured" : "Not Available"}
             </div>
-            <Button size="lg" onClick={handleAction}>
+            <Button className="px-5 py-2.5 text-base" onClick={handleAction}>
               <Clock8 className="mr-2" size={18} /> {checkedIn ? "Check-Out" : "Check-In"}
             </Button>
           </div>
