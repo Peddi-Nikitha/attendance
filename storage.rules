@@ -1,0 +1,72 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to get user data
+    function getUserData() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return isAuthenticated() && getUserData().role == 'admin';
+    }
+    
+    // Avatar uploads: Users can upload their own avatar
+    match /avatars/{userId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+                      request.auth.uid == userId &&
+                      request.resource.size < 5 * 1024 * 1024 && // 5MB limit
+                      request.resource.contentType.matches('image/.*');
+      allow delete: if isAuthenticated() && 
+                       (request.auth.uid == userId || isAdmin());
+    }
+    
+    // Leave attachments: Employees can upload, admins can read all
+    match /leave-attachments/{leaveId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+                      request.resource.size < 10 * 1024 * 1024 && // 10MB limit
+                      request.resource.contentType.matches('(image|application/pdf).*');
+      allow delete: if isAdmin();
+    }
+    
+    // Payslip PDFs: Employees can read their own, admins can read all
+    match /payslips/{employeeId}/{fileName} {
+      allow read: if isAuthenticated() && 
+                     (request.auth.uid == employeeId || isAdmin());
+      allow write: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Report files: Users can read their own reports, admins can read all
+    match /reports/{reportId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+    
+    // Company logos: All authenticated users can read, only admins can upload
+    match /logos/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && 
+                      request.resource.size < 2 * 1024 * 1024 && // 2MB limit
+                      request.resource.contentType.matches('image/.*');
+      allow delete: if isAdmin();
+    }
+    
+    // Deny all other paths
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+

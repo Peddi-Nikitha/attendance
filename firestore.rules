@@ -1,0 +1,264 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to get user data
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return isAuthenticated() && getUserData().role == 'admin';
+    }
+    
+    // Helper function to check if user is employee
+    function isEmployee() {
+      return isAuthenticated() && getUserData().role == 'employee';
+    }
+    
+    // Helper function to check if employeeId matches current user's employee record
+    function isEmployeeOwner(employeeId) {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/employees/$(employeeId)) &&
+             get(/databases/$(database)/documents/employees/$(employeeId)).data.userId == request.auth.uid;
+    }
+    
+    // Helper function to check if user owns the resource (by userId match)
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Helper function to validate required fields
+    function hasRequiredFields(requiredFields) {
+      return request.resource.data.keys().hasAll(requiredFields);
+    }
+    
+    // Helper function to check if timestamp fields are set correctly
+    function hasValidTimestamps() {
+      return request.resource.data.createdAt is timestamp &&
+             request.resource.data.updatedAt is timestamp;
+    }
+    
+    // ============================================
+    // USERS COLLECTION
+    // ============================================
+    match /users/{userId} {
+      // Users can read their own profile
+      // Admins can read any user profile
+      allow read: if isAuthenticated() && 
+                     (isOwner(userId) || isAdmin());
+      
+      // Users can create their own profile during signup
+      allow create: if isAuthenticated() && 
+                       isOwner(userId) &&
+                       request.resource.data.id == request.auth.uid &&
+                       request.resource.data.keys().hasAll(['id', 'email', 'name', 'role']);
+      
+      // Users can update their own profile (except role)
+      // Admins can update any user profile
+      allow update: if isAuthenticated() && 
+                       (isOwner(userId) || isAdmin()) &&
+                       // Prevent role change unless admin
+                       (isAdmin() || request.resource.data.role == resource.data.role);
+      
+      // Only admins can delete users
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // EMPLOYEES COLLECTION
+    // ============================================
+    match /employees/{employeeId} {
+      // Employees can read their own employee record (by userId match)
+      // Admins can read any employee record
+      allow read: if isAuthenticated() && 
+                     (resource.data.userId == request.auth.uid || isAdmin());
+      
+      // Only admins can create employee records
+      allow create: if isAdmin() &&
+                       request.resource.data.keys().hasAll(['userId', 'employeeId', 'department', 'designation', 'joinDate', 'isActive']);
+      
+      // Only admins can update employee records
+      allow update: if isAdmin();
+      
+      // Only admins can delete employee records
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // ATTENDANCE COLLECTION
+    // ============================================
+    match /attendance/{attendanceId} {
+      // Employees can read their own attendance records
+      // Admins can read any attendance record
+      allow read: if isAuthenticated() && 
+                     (isAdmin() || 
+                      isEmployeeOwner(resource.data.employeeId));
+      
+      // Employees can create their own attendance (check-in)
+      // Must match their employeeId
+      allow create: if isAuthenticated() && 
+                       isEmployee() &&
+                       isEmployeeOwner(request.resource.data.employeeId) &&
+                       request.resource.data.keys().hasAll(['employeeId', 'date', 'status']);
+      
+      // Only admins can update attendance (manual corrections)
+      allow update: if isAdmin();
+      
+      // Only admins can delete attendance records
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // LEAVE REQUESTS COLLECTION
+    // ============================================
+    match /leaveRequests/{leaveId} {
+      // Employees can read their own leave requests
+      // Admins can read any leave request
+      allow read: if isAuthenticated() && 
+                     (isAdmin() || 
+                      isEmployeeOwner(resource.data.employeeId));
+      
+      // Employees can create their own leave requests
+      // Must match their employeeId and have required fields
+      allow create: if isAuthenticated() && 
+                       isEmployee() &&
+                       isEmployeeOwner(request.resource.data.employeeId) &&
+                       request.resource.data.keys().hasAll(['employeeId', 'type', 'from', 'to', 'status']) &&
+                       request.resource.data.status == 'Pending';
+      
+      // Only admins can update leave requests (approve/reject)
+      allow update: if isAdmin() &&
+                       // Ensure status is valid
+                       request.resource.data.status in ['Pending', 'Approved', 'Rejected', 'Cancelled'];
+      
+      // Employees can cancel their own pending leave requests
+      // Admins can delete any leave request
+      allow delete: if isAdmin() || 
+                       (isEmployee() && 
+                        isEmployeeOwner(resource.data.employeeId) &&
+                        resource.data.status == 'Pending');
+    }
+    
+    // ============================================
+    // PAYSLIPS COLLECTION
+    // ============================================
+    match /payslips/{payslipId} {
+      // Employees can read their own payslips
+      // Admins can read any payslip
+      allow read: if isAuthenticated() && 
+                     (isAdmin() || 
+                      isEmployeeOwner(resource.data.employeeId));
+      
+      // Only admins can create payslips
+      allow create: if isAdmin() &&
+                       request.resource.data.keys().hasAll(['employeeId', 'month', 'year', 'netSalary', 'status']);
+      
+      // Only admins can update payslips
+      allow update: if isAdmin();
+      
+      // Only admins can delete payslips
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // HOLIDAYS COLLECTION
+    // ============================================
+    match /holidays/{holidayId} {
+      // All authenticated users can read holidays
+      allow read: if isAuthenticated();
+      
+      // Only admins can create holidays
+      allow create: if isAdmin() &&
+                       request.resource.data.keys().hasAll(['name', 'date', 'type', 'isActive']);
+      
+      // Only admins can update holidays
+      allow update: if isAdmin();
+      
+      // Only admins can delete holidays
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // TIMESHEETS COLLECTION
+    // ============================================
+    match /timesheets/{timesheetId} {
+      // Employees can read their own timesheets
+      // Admins can read any timesheet
+      allow read: if isAuthenticated() && 
+                     (isAdmin() || 
+                      isEmployeeOwner(resource.data.employeeId));
+      
+      // Employees can create their own timesheets
+      // Must match their employeeId
+      allow create: if isAuthenticated() && 
+                       isEmployee() &&
+                       isEmployeeOwner(request.resource.data.employeeId) &&
+                       request.resource.data.keys().hasAll(['employeeId', 'date', 'totalHours', 'status']);
+      
+      // Employees can update their own timesheets (if status is draft)
+      // Admins can update any timesheet
+      allow update: if isAdmin() || 
+                       (isEmployee() && 
+                        isEmployeeOwner(resource.data.employeeId) &&
+                        resource.data.status == 'draft');
+      
+      // Only admins can delete timesheets
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // SETTINGS COLLECTION
+    // ============================================
+    match /settings/{settingId} {
+      // All authenticated users can read settings
+      allow read: if isAuthenticated();
+      
+      // Only admins can create settings
+      allow create: if isAdmin();
+      
+      // Only admins can update settings
+      allow update: if isAdmin();
+      
+      // Only admins can delete settings
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // REPORTS COLLECTION
+    // ============================================
+    match /reports/{reportId} {
+      // Users can read reports they generated
+      // Admins can read any report
+      allow read: if isAuthenticated() && 
+                     (isAdmin() || 
+                      resource.data.generatedBy == request.auth.uid);
+      
+      // All authenticated users can create reports
+      allow create: if isAuthenticated() &&
+                       request.resource.data.generatedBy == request.auth.uid &&
+                       request.resource.data.keys().hasAll(['type', 'title', 'generatedBy', 'status']);
+      
+      // Users can update their own reports
+      // Admins can update any report
+      allow update: if isAuthenticated() && 
+                       (isAdmin() || 
+                        resource.data.generatedBy == request.auth.uid);
+      
+      // Users can delete their own reports
+      // Admins can delete any report
+      allow delete: if isAuthenticated() && 
+                       (isAdmin() || 
+                        resource.data.generatedBy == request.auth.uid);
+    }
+    
+  }
+}
+
