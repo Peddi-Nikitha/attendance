@@ -96,22 +96,26 @@ service cloud.firestore {
     // ATTENDANCE COLLECTION
     // ============================================
     match /attendance/{attendanceId} {
-      // Employees can read their own attendance records
-      // Admins can read any attendance record
-      allow read: if isAuthenticated() && 
-                     (isAdmin() || 
-                      isEmployeeOwner(resource.data.employeeId));
-      
-      // Employees can create their own attendance (check-in)
-      // Must match their employeeId
-      allow create: if isAuthenticated() && 
-                       isEmployee() &&
-                       isEmployeeOwner(request.resource.data.employeeId) &&
+      // Read own records or any as admin
+      allow read: if isAuthenticated() &&
+                     (isAdmin() ||
+                      isEmployeeOwner(resource.data.employeeId) ||
+                      resource.data.employeeId == request.auth.uid);
+
+      // Create (check-in): allow either employees mapping OR direct UID ownership (dev-friendly)
+      allow create: if isAuthenticated() &&
+                       (
+                         isEmployeeOwner(request.resource.data.employeeId) ||
+                         request.resource.data.employeeId == request.auth.uid
+                       ) &&
                        request.resource.data.keys().hasAll(['employeeId', 'date', 'status']);
-      
-      // Only admins can update attendance (manual corrections)
-      allow update: if isAdmin();
-      
+
+      // Update (check-out/totalHours): allow owner or admin
+      allow update: if isAuthenticated() &&
+                       (isAdmin() ||
+                        isEmployeeOwner(resource.data.employeeId) ||
+                        resource.data.employeeId == request.auth.uid);
+
       // Only admins can delete attendance records
       allow delete: if isAdmin();
     }

@@ -6,7 +6,9 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
 import { CalendarDays, Clock8, Leaf } from "lucide-react";
-import { useDataStore } from "@/lib/datastore";
+import { useAuth } from "@/lib/firebase/hooks/useAuth";
+import { useAttendanceToday, useCheckIn, useCheckOut } from "@/lib/firebase/hooks/useAttendance";
+import { useEmployeeByUserId } from "@/lib/firebase/hooks/useEmployees";
 
 const weeklyData = [
   { name: "Mon", hours: 8 },
@@ -20,10 +22,14 @@ const weeklyData = [
 
 export default function EmployeeDashboardPage() {
   const router = useRouter();
-  const store = useDataStore();
-  const employeeId = "e1"; // demo current user id
-  const [checkedIn, setCheckedIn] = useState<boolean>(false);
+  const { user } = useAuth();
+  const { employee, loading: employeeLoading } = useEmployeeByUserId(user?.uid);
+  const employeeId = employee?.id || user?.uid;
+  const { data, checkedIn, loading: attendanceLoading } = useAttendanceToday(employeeId);
+  const { mutate: doCheckIn, loading: checkInLoading, error: checkInError } = useCheckIn();
+  const { mutate: doCheckOut, loading: checkOutLoading, error: checkOutError } = useCheckOut();
   const [timestamp, setTimestamp] = useState<string>("");
+  const [runningHours, setRunningHours] = useState<string>("");
 
   useEffect(() => {
     const user = getCurrentUser();
@@ -32,28 +38,64 @@ export default function EmployeeDashboardPage() {
     }
   }, [router]);
 
+  // Update timestamp based on last action from Firestore
   useEffect(() => {
-    // subscribe to datastore to reflect updates live
-    const unsub = store.subscribe(() => {
-      // naive inference of checked-in by presence of checkIn without checkOut today
-      const date = new Date();
-      const today = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-      const log = store.attendance.find((l) => l.employeeId === employeeId && l.date === today);
-      setCheckedIn(!!(log?.checkIn && !log?.checkOut));
-    });
-    return () => unsub();
-  }, [store]);
+    if (data?.checkOut) {
+      setTimestamp(data.checkOut.timestamp.toDate().toLocaleString());
+    } else if (data?.checkIn) {
+      setTimestamp(data.checkIn.timestamp.toDate().toLocaleString());
+    } else {
+      setTimestamp("");
+    }
+  }, [data?.checkIn, data?.checkOut]);
 
-  const handleCheck = () => {
+  // Live hours while checked in
+  useEffect(() => {
+    if (!checkedIn || !data?.checkIn?.timestamp) {
+      setRunningHours("");
+      return;
+    }
+    const calc = () => {
+      try {
+        const inMs = data.checkIn!.timestamp.toMillis();
+        const nowMs = Date.now();
+        const hours = (nowMs - inMs) / (1000 * 60 * 60);
+        setRunningHours(hours.toFixed(2));
+      } catch {
+        setRunningHours("");
+      }
+    };
+    calc();
+    const id = setInterval(calc, 30000);
+    return () => clearInterval(id);
+  }, [checkedIn, data?.checkIn?.timestamp]);
+
+  const displayTotal = (() => {
+    if (data?.checkOut && data?.checkIn) {
+      if (typeof data.totalHours === "number") return data.totalHours.toFixed(2);
+      try {
+        const inMs = data.checkIn.timestamp.toMillis();
+        const outMs = data.checkOut.timestamp.toMillis();
+        const hours = (outMs - inMs) / (1000 * 60 * 60);
+        return Math.max(0, Number(hours.toFixed(2))).toFixed(2);
+      } catch {
+        return "";
+      }
+    }
+    if (checkedIn && runningHours) return runningHours;
+    return "";
+  })();
+
+  async function handleCheck() {
+    if (!employeeId) return;
     const now = new Date();
     setTimestamp(now.toLocaleString());
-    setCheckedIn((v) => !v);
     if (!checkedIn) {
-      store.checkIn(employeeId);
+      await doCheckIn(employeeId);
     } else {
-      store.checkOut(employeeId);
+      await doCheckOut(employeeId);
     }
-  };
+  }
 
   return (
     <div className="space-y-6">
@@ -83,6 +125,11 @@ export default function EmployeeDashboardPage() {
               }`}>{checkedIn ? "Present" : "Not Checked-In"}</span>
               <span className="text-xs text-slate-500">{timestamp || "—"}</span>
             </div>
+            {displayTotal && (
+              <div className="mt-2 text-xs text-slate-500">
+                {data?.checkOut ? "Total hours" : "Working so far"}: {displayTotal}
+              </div>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -112,11 +159,18 @@ export default function EmployeeDashboardPage() {
         <CardHeader title="Quick Actions" />
         <CardContent>
           <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={handleCheck} className="px-5 py-2.5 text-base">
+            <Button
+              onClick={handleCheck}
+              className="px-5 py-2.5 text-base"
+              disabled={!employeeId || employeeLoading || attendanceLoading || checkInLoading || checkOutLoading}
+            >
               <Clock8 className="mr-2" size={18} /> {checkedIn ? "Check-Out" : "Check-In"}
             </Button>
             <span className="text-xs text-slate-500">{timestamp ? `Last action: ${timestamp}` : ""}</span>
           </div>
+          {(checkInError || checkOutError) && (
+            <div className="mt-2 text-sm text-red-600">{(checkInError || checkOutError)?.message}</div>
+          )}
         </CardContent>
       </Card>
 

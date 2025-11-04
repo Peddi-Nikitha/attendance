@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from 'react';
-import { onSnapshot, collection, query, where, orderBy } from 'firebase/firestore';
+import { onSnapshot, collection, query, where, orderBy, limit } from 'firebase/firestore';
 import { db } from '../config';
 import type { Employee } from '../services/employees';
 import { createEmployee, updateEmployee, deleteEmployee } from '../services/employees';
@@ -103,6 +103,27 @@ export function useDeleteEmployee() {
   }, []);
   const reset = useCallback(() => { setError(null); setIsSuccess(false); }, []);
   return { mutate, isLoading, error, isSuccess, reset };
+}
+
+export function useEmployeeByUserId(userId?: string) {
+  const [employee, setEmployee] = useState<Employee | null>(null);
+  const [loading, setLoading] = useState<boolean>(!!userId);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    if (!userId) { setEmployee(null); setLoading(false); return; }
+    setLoading(true); setError(null);
+    const col = collection(db, 'employees');
+    const q = query(col, where('userId', '==', userId), limit(1));
+    const unsub = onSnapshot(q, (snap) => {
+      const doc = snap.docs[0];
+      setEmployee(doc ? ({ id: doc.id, ...(doc.data() as any) } as Employee) : null);
+      setLoading(false);
+    }, (err) => { setError(err); setLoading(false); });
+    return () => unsub();
+  }, [userId]);
+
+  return { employee, loading, error } as const;
 }
 
 
