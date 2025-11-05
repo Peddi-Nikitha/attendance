@@ -126,6 +126,41 @@ export function useEmployeeByUserId(userId?: string) {
   return { employee, loading, error } as const;
 }
 
+export function useEmployeeByEmail(email?: string) {
+  const [employee, setEmployee] = useState<Employee | null>(null);
+  const [loading, setLoading] = useState<boolean>(!!email);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    if (!email) { setEmployee(null); setLoading(false); return; }
+    setLoading(true); setError(null);
+    const col = collection(db, 'employees');
+    const q = query(col, where('email', '==', email.toLowerCase()), limit(1));
+    const unsub = onSnapshot(q, async (snap) => {
+      const docSnap = snap.docs[0];
+      if (!docSnap) {
+        setEmployee(null);
+        setLoading(false);
+        return;
+      }
+      const e = ({ id: docSnap.id, ...(docSnap.data() as any) } as Employee);
+      // If leaveBalance missing, set defaults once
+      if (!e.leaveBalance) {
+        try {
+          await updateEmployee(e.id, { leaveBalance: { casual: 10, sick: 10, privilege: 10 } });
+        } catch {}
+        // Optimistically reflect defaults in UI immediately
+        e.leaveBalance = { casual: 10, sick: 10, privilege: 10 };
+      }
+      setEmployee(e);
+      setLoading(false);
+    }, (err) => { setError(err); setLoading(false); });
+    return () => unsub();
+  }, [email]);
+
+  return { employee, loading, error } as const;
+}
+
 
 
 

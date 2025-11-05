@@ -5,10 +5,8 @@ import { getCurrentUser, logout } from "../../lib/auth";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
-import { CalendarDays, Clock8, Leaf } from "lucide-react";
-import { useAuth } from "@/lib/firebase/hooks/useAuth";
+import { CalendarDays, Clock8, Leaf, MapPin } from "lucide-react";
 import { useAttendanceToday, useCheckIn, useCheckOut } from "@/lib/firebase/hooks/useAttendance";
-import { useEmployeeByUserId } from "@/lib/firebase/hooks/useEmployees";
 
 const weeklyData = [
   { name: "Mon", hours: 8 },
@@ -22,21 +20,61 @@ const weeklyData = [
 
 export default function EmployeeDashboardPage() {
   const router = useRouter();
-  const { user } = useAuth();
-  const { employee, loading: employeeLoading } = useEmployeeByUserId(user?.uid);
-  const employeeId = employee?.id || user?.uid;
-  const { data, checkedIn, loading: attendanceLoading } = useAttendanceToday(employeeId);
+  const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  
+  // Get user from localStorage
+  useEffect(() => {
+    const user = getCurrentUser();
+    setCurrentUser(user);
+    setLoading(false);
+  }, []);
+  
+  const userId = currentUser?.email; // Use email as unique identifier
+  const { data, checkedIn, loading: attendanceLoading } = useAttendanceToday(userId);
   const { mutate: doCheckIn, loading: checkInLoading, error: checkInError } = useCheckIn();
   const { mutate: doCheckOut, loading: checkOutLoading, error: checkOutError } = useCheckOut();
   const [timestamp, setTimestamp] = useState<string>("");
   const [runningHours, setRunningHours] = useState<string>("");
+  const [nowStr, setNowStr] = useState<string>("");
+  const [gpsOk, setGpsOk] = useState<boolean>(false);
+  const [gpsCoords, setGpsCoords] = useState<{ latitude: number; longitude: number } | undefined>(undefined);
 
   useEffect(() => {
-    const user = getCurrentUser();
-    if (!user || user.role !== "employee") {
-      router.replace("/login");
+    // Check localStorage auth - redirect if not authenticated or not an employee
+    if (!loading) {
+      if (!currentUser || currentUser.role !== "employee") {
+        router.replace("/login");
+      }
     }
-  }, [router]);
+  }, [loading, currentUser, router]);
+
+  // GPS capture
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setGpsOk(false);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setGpsOk(true);
+        setGpsCoords({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+      },
+      () => {
+        setGpsOk(false);
+        setGpsCoords(undefined);
+      },
+      { enableHighAccuracy: true, timeout: 3000 }
+    );
+  }, []);
+
+  // Client-only clock to avoid hydration mismatch
+  useEffect(() => {
+    const tick = () => setNowStr(new Date().toLocaleTimeString());
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Update timestamp based on last action from Firestore
   useEffect(() => {
@@ -49,7 +87,7 @@ export default function EmployeeDashboardPage() {
     }
   }, [data?.checkIn, data?.checkOut]);
 
-  // Live hours while checked in
+  // Live timer - updates every second when checked in
   useEffect(() => {
     if (!checkedIn || !data?.checkIn?.timestamp) {
       setRunningHours("");
@@ -65,8 +103,8 @@ export default function EmployeeDashboardPage() {
         setRunningHours("");
       }
     };
-    calc();
-    const id = setInterval(calc, 30000);
+    calc(); // Calculate immediately
+    const id = setInterval(calc, 1000); // Update every second
     return () => clearInterval(id);
   }, [checkedIn, data?.checkIn?.timestamp]);
 
@@ -87,15 +125,54 @@ export default function EmployeeDashboardPage() {
   })();
 
   async function handleCheck() {
-    if (!employeeId) return;
-    const now = new Date();
-    setTimestamp(now.toLocaleString());
-    if (!checkedIn) {
-      await doCheckIn(employeeId);
-    } else {
-      await doCheckOut(employeeId);
+    console.log("handleCheck called");
+    
+    // Use userId from localStorage
+    const idToUse = userId;
+    
+    console.log("ID to use:", idToUse);
+    console.log("checkedIn:", checkedIn);
+    console.log("data:", data);
+    
+    if (!idToUse) {
+      console.error("No user ID available");
+      return;
+    }
+    
+    try {
+      console.log("Attempting check-in/out...");
+      if (!checkedIn) {
+        console.log("Calling doCheckIn with:", idToUse, gpsCoords);
+        await doCheckIn(idToUse, gpsCoords);
+      } else {
+        console.log("Calling doCheckOut with:", idToUse, gpsCoords);
+        await doCheckOut(idToUse, gpsCoords);
+      }
+      console.log("Check-in/out completed successfully");
+    } catch (error) {
+      console.error("Check-in/out error:", error);
+      // Error will be displayed via checkInError or checkOutError
     }
   }
+  
+  // Button text - updates in real-time based on Firestore listener
+  const buttonText = checkInLoading || checkOutLoading 
+    ? "Processing..." 
+    : checkedIn 
+      ? "Check-Out" 
+      : "Check-In";
+
+  // Debug disabled conditions - allow button if userId exists and user is authenticated
+  const isDisabled = loading || !userId || !currentUser || attendanceLoading || checkInLoading || checkOutLoading;
+  console.log("Button disabled conditions:", {
+    loading,
+    userId,
+    currentUser: currentUser?.email,
+    attendanceLoading,
+    checkInLoading,
+    checkOutLoading,
+    isDisabled
+  });
 
   return (
     <div className="space-y-6">
@@ -123,8 +200,15 @@ export default function EmployeeDashboardPage() {
               <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
                 checkedIn ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"
               }`}>{checkedIn ? "Present" : "Not Checked-In"}</span>
-              <span className="text-xs text-slate-500">{timestamp || "—"}</span>
+              <span className="text-xs text-slate-500">
+                {data?.checkIn ? data.checkIn.timestamp.toDate().toLocaleTimeString() : (timestamp || "—")}
+              </span>
             </div>
+            {currentUser && (
+              <div className="text-xs text-slate-500 mt-1">
+                Welcome, {currentUser.name}
+              </div>
+            )}
             {displayTotal && (
               <div className="mt-2 text-xs text-slate-500">
                 {data?.checkOut ? "Total hours" : "Working so far"}: {displayTotal}
@@ -158,19 +242,62 @@ export default function EmployeeDashboardPage() {
       <Card>
         <CardHeader title="Quick Actions" />
         <CardContent>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              onClick={handleCheck}
-              className="px-5 py-2.5 text-base"
-              disabled={!employeeId || employeeLoading || attendanceLoading || checkInLoading || checkOutLoading}
-            >
-              <Clock8 className="mr-2" size={18} /> {checkedIn ? "Check-Out" : "Check-In"}
-            </Button>
-            <span className="text-xs text-slate-500">{timestamp ? `Last action: ${timestamp}` : ""}</span>
+          <div className="space-y-4">
+            {/* Enhanced Check-in Widget */}
+            <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">Check In / Check Out</h3>
+                  <p className="text-xs text-slate-500">Current time: <span suppressHydrationWarning>{nowStr || "—"}</span></p>
+                </div>
+                {checkedIn && runningHours && (
+                  <div className="text-right">
+                    <div className="text-xs text-slate-500">Working</div>
+                    <div className="text-lg font-semibold text-blue-600">{runningHours}h</div>
+                  </div>
+                )}
+              </div>
+              
+              {data?.checkIn && (
+                <div className="text-xs text-slate-600">
+                  Checked in: {data.checkIn.timestamp.toDate().toLocaleTimeString()}
+                </div>
+              )}
+              {data?.checkOut && (
+                <div className="text-xs text-slate-600">
+                  Checked out: {data.checkOut.timestamp.toDate().toLocaleTimeString()}
+                  {displayTotal && <span className="ml-2">• Total: {displayTotal}h</span>}
+                </div>
+              )}
+              
+              <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 shadow-sm w-fit">
+                <MapPin size={14} className={gpsOk ? "text-green-600" : "text-amber-600"} />
+                GPS {gpsOk ? "Captured" : "Not Available"}
+              </div>
+              
+              {(checkInError || checkOutError) && (
+                <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1">
+                  {(checkInError || checkOutError)?.message || "An error occurred. Please try again."}
+                </div>
+              )}
+              
+              <Button
+                className="w-full"
+                onClick={(e) => {
+                  e.preventDefault();
+                  console.log("Button clicked, disabled:", isDisabled);
+                  if (!isDisabled) {
+                    handleCheck();
+                  }
+                }}
+                disabled={isDisabled}
+                type="button"
+              >
+                <Clock8 className="mr-2" size={16} />
+                {buttonText}
+              </Button>
+            </div>
           </div>
-          {(checkInError || checkOutError) && (
-            <div className="mt-2 text-sm text-red-600">{(checkInError || checkOutError)?.message}</div>
-          )}
         </CardContent>
       </Card>
 

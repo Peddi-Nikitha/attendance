@@ -20,6 +20,8 @@ export function loginWithStaticCredentials(email: string, password: string): Aut
   const user: AuthUser = { email: email.toLowerCase(), name: record.name, role: record.role };
   if (typeof window !== "undefined") {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+    // Dispatch custom event to notify other components
+    window.dispatchEvent(new Event("localStorageChange"));
   }
   return user;
 }
@@ -38,6 +40,8 @@ export function getCurrentUser(): AuthUser | null {
 export function logout(): void {
   if (typeof window !== "undefined") {
     localStorage.removeItem(STORAGE_KEY);
+    // Dispatch custom event to notify other components
+    window.dispatchEvent(new Event("localStorageChange"));
   }
 }
 

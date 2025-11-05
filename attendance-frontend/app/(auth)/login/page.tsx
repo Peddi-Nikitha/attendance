@@ -51,6 +51,8 @@ export default function LoginPage() {
             "attendance_auth_user",
             JSON.stringify({ email: authUser.email, name: authUser.name, role: authUser.role })
           );
+          // Dispatch custom event to notify other components
+          window.dispatchEvent(new Event("localStorageChange"));
         } catch {}
         const destination = authUser.role === "admin" ? "/admin" : "/employee";
         router.replace(destination);
