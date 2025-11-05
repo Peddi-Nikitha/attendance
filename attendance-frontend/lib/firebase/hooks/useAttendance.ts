@@ -1,7 +1,12 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AttendanceDoc, GpsLocation } from "@/lib/firebase/services/attendance";
-import { listenTodayAttendance, checkIn as svcCheckIn, checkOut as svcCheckOut } from "@/lib/firebase/services/attendance";
+import { 
+  listenTodayAttendance, 
+  checkIn as svcCheckIn, 
+  checkOut as svcCheckOut,
+  listenEmployeeAttendanceRecords
+} from "@/lib/firebase/services/attendance";
 
 export function useAttendanceToday(employeeId?: string) {
   const [data, setData] = useState<AttendanceDoc | null>(null);
@@ -82,6 +87,45 @@ export function useCheckOut() {
   }
 
   return { mutate, loading, error, success, reset } as const;
+}
+
+export function useEmployeeAttendanceRecords(employeeId?: string, limitCount: number = 30) {
+  const [data, setData] = useState<AttendanceDoc[]>([]);
+  const [loading, setLoading] = useState<boolean>(!!employeeId);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    if (!employeeId) {
+      setData([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    
+    const unsub = listenEmployeeAttendanceRecords(
+      employeeId,
+      (docs) => {
+        setData(docs);
+        setLoading(false);
+        // Don't clear index errors - user should see them even if data loads
+      },
+      (err) => {
+        // Error callback - set error but data may still load via fallback
+        setError(err);
+        // Only stop loading if it's not an index error (fallback will handle it)
+        if (!err.message?.includes("index")) {
+          setLoading(false);
+        }
+      },
+      limitCount
+    );
+    
+    return () => unsub();
+  }, [employeeId, limitCount]);
+
+  return { data, loading, error } as const;
 }
 
 
