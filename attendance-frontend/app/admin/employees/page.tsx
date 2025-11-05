@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Employee as StoreEmployee } from "@/lib/datastore";
-import { createEmployeeUser } from "@/lib/firebase/functions";
+import { createEmployeeUser } from "../../../lib/firebase/functions";
 import { useEmployees } from "@/lib/firebase/hooks/useEmployees";
 import { createEmployee } from "@/lib/firebase/services/employees";
 
