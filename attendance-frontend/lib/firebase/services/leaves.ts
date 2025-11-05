@@ -12,6 +12,7 @@ import {
   serverTimestamp,
   Timestamp,
   Unsubscribe,
+  FieldValue,
 } from "firebase/firestore";
 
 export type LeaveType = "Casual" | "Sick" | "Privilege";
@@ -25,8 +26,8 @@ export type LeaveRequestDoc = {
   from: string; // YYYY-MM-DD
   to: string; // YYYY-MM-DD
   status: LeaveStatus;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: Timestamp | FieldValue;
+  updatedAt: Timestamp | FieldValue;
 };
 
 const COLLECTION_NAME = "leaveRequests";
