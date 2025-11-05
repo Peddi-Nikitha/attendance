@@ -19,7 +19,10 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": [
+        "attendance-frontend/*",
+        "./*"
+      ]
     }
   },
   "include": [
