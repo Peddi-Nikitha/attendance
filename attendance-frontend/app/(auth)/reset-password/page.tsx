@@ -1,3 +1,4 @@
+"use client";
 import React, { useCallback, useState } from "react";
 import { Button } from "../../../components/ui/button";
 import { useUpdatePassword } from "../../../lib/firebase/hooks/useAuth";
